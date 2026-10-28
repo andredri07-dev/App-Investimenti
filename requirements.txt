@@ -1,2 +1,5 @@
 streamlit
 google-genai
+feedparser
+beautifulsoup4
+requests
