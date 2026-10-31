@@ -5,12 +5,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import feedparser
 import time
+import requests
 import urllib.parse
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
-# Configurazione pagina
+# Configurazione interfaccia
 st.set_page_config(
     page_title="Terminale Analisi Investimenti",
     layout="wide",
@@ -18,7 +19,7 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# KNOWLEDGE BASE: MAPPATURA ENTITÀ E DOMINI WEB UFFICIALI AUTORIZZATI
+# KNOWLEDGE BASE: MAPPATURA ENTI E DOMINI WEB UFFICIALI AUTORIZZATI
 # -----------------------------------------------------------------------------
 FONTI_KB = {
     "SGR & Banche d'Affari Italiane (Buy-Side)": {
@@ -150,7 +151,33 @@ FONTI_KB = {
 }
 
 # -----------------------------------------------------------------------------
-# DATI QUANTITATIVI DETERMINISTICI (Zero calcoli via LLM)
+# RISOLUTORE AUTOMATICO TICKER DA QUALSIASI NOME O SIMBOLO
+# -----------------------------------------------------------------------------
+def risolvi_simbolo_ticker(testo_ricerca):
+    query = testo_ricerca.strip()
+    if not query:
+        return None
+    # Se ha già un suffisso di borsa (es. .MI, .DE, .MC) o è un ticker puro corto
+    if "." in query or (query.isupper() and len(query) <= 5):
+        return query.upper()
+    
+    # Ricerca automatica via API di Yahoo Finance
+    try:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={urllib.parse.quote(query)}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=4)
+        if resp.status_code == 200:
+            dati = resp.json()
+            quotes = dati.get("quotes", [])
+            if quotes:
+                return quotes[0]["symbol"]
+    except Exception:
+        pass
+    
+    return query.upper()
+
+# -----------------------------------------------------------------------------
+# DATI QUANTITATIVI DETERMINISTICI
 # -----------------------------------------------------------------------------
 @st.cache_data(ttl=900)
 def estrai_dati_mercato(ticker_simbolo, periodo="1y"):
@@ -174,8 +201,6 @@ def crea_grafico_candele(df, ticker_simbolo):
         vertical_spacing=0.03,
         row_heights=[0.75, 0.25]
     )
-    
-    # Serie Prezzi e Medie Mobili
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df['Open'], high=df['High'],
@@ -195,7 +220,6 @@ def crea_grafico_candele(df, ticker_simbolo):
         name="SMA 50"
     ), row=1, col=1)
     
-    # Istogramma Volumi
     colori_vol = ['#26a69a' if c >= o else '#ef5350' for c, o in zip(df['Close'], df['Open'])]
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'],
@@ -206,7 +230,7 @@ def crea_grafico_candele(df, ticker_simbolo):
     fig.update_layout(
         title=f"Analisi Tecnica: {ticker_simbolo}",
         xaxis_rangeslider_visible=False,
-        height=540,
+        height=520,
         margin=dict(l=10, r=10, t=40, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -218,8 +242,6 @@ def crea_grafico_candele(df, ticker_simbolo):
 def estrai_notizie_filtrate(query_nome, domini_autorizzati):
     if not domini_autorizzati:
         return []
-    
-    # Costruzione filtro domini (fino a un massimo di 10 per query per evitare limitazioni di lunghezza URL)
     filtro_siti = " OR ".join([f"site:{d}" for d in domini_autorizzati[:10]])
     query_finale = f"{query_nome} ({filtro_siti})"
     query_encoded = urllib.parse.quote(query_finale)
@@ -265,7 +287,7 @@ def esegui_analisi_qualitativa(prompt, api_key):
                 time.sleep(attesa)
                 attesa *= 2
             else:
-                return f"Servizio temporaneamente sovraccarico (Errore 503/Quota): {str(e)}. Riprova tra un istante."
+                return f"Servizio temporaneamente sovraccarico (Errore 503): {str(e)}. Riprova tra un istante."
         except Exception as e:
             return f"Errore durante l'elaborazione del report: {str(e)}"
 
@@ -281,14 +303,14 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("📚 Knowledge Base: Filtro Fonti")
-    st.caption("Seleziona le entità autorizzate per il filtraggio web:")
+    st.caption("Seleziona le entità per il filtraggio delle notizie:")
     
     fonti_attive_nomi = []
     domini_attivi = []
     
     for categoria, dict_fonti in FONTI_KB.items():
         with st.expander(categoria, expanded=False):
-            seleziona_gruppo = st.checkbox(f"Seleziona tutto ({categoria})", value=True, key=f"all_{categoria}")
+            seleziona_gruppo = st.checkbox(f"Tutte ({categoria})", value=True, key=f"all_{categoria}")
             for nome_fonte, dominio in dict_fonti.items():
                 attivo = st.checkbox(nome_fonte, value=seleziona_gruppo, key=f"{categoria}_{nome_fonte}")
                 if attivo:
@@ -298,36 +320,47 @@ with st.sidebar:
 
 # Finestra Principale
 st.title("🏛️ Terminale Investimenti & Ricerca Finanziaria")
-st.markdown("Analisi quantitativa automatica combinata con sintesi qualitativa istituzionale (`gemini-3.8-flash`).")
+st.markdown("Cerca **qualsiasi azienda o ticker mondiale** (es. *Stellantis, Ferrari, Apple, Eni, ASML, ISP.MI, TSLA*):")
 
 col_t1, col_t2 = st.columns([3, 1])
 with col_t1:
-    ticker_input = st.text_input("Inserisci Simbolo Ticker (es. ENI.MI, ISP.MI, AAPL, NVDA)", value="ENI.MI").upper().strip()
+    # Casella di testo aperta: nessun valore bloccato di default
+    input_utente = st.text_input(
+        "Digita il nome dell'azienda o il ticker:",
+        placeholder="Es: Ferrari, Stellantis, Apple, ISP.MI, ENEL.MI...",
+        key="ricerca_titolo"
+    )
 with col_t2:
     periodo_scelto = st.selectbox("Orizzonte Dati", ["3mo", "6mo", "1y", "2y", "5y"], index=2)
 
 if st.button("🚀 Avvia Analisi Completa", type="primary", use_container_width=True):
-    if not api_key:
-        st.error("Chiave API mancante. Inseriscila nel campo laterale o nei Secrets di Streamlit.")
+    if not input_utente.strip():
+        st.warning("Per iniziare, inserisci il nome di un'azienda o un ticker nella casella di ricerca.")
         st.stop()
         
-    with st.spinner("Estrazione dati di mercato e scansione fonti autorizzate..."):
+    if not api_key:
+        st.error("Chiave API mancante. Inseriscila nella barra laterale o nei Secrets.")
+        st.stop()
+
+    with st.spinner("Identificazione del titolo e scaricamento dati di mercato..."):
+        ticker_risolto = risolvi_simbolo_ticker(input_utente)
+        
         try:
-            storico, info = estrai_dati_mercato(ticker_input, periodo=periodo_scelto)
+            storico, info = estrai_dati_mercato(ticker_risolto, periodo=periodo_scelto)
         except Exception as e:
-            st.error(f"Errore nel download dei dati per il titolo {ticker_input}: {e}")
+            st.error(f"Impossibile trovare dati per '{input_utente}'. Errore: {e}")
             st.stop()
 
     if storico.empty:
-        st.warning(f"Nessun dato di mercato disponibile per il ticker '{ticker_input}'. Verifica il simbolo.")
+        st.warning(f"Nessun dato di mercato trovato per '{input_utente}' (identificato come '{ticker_risolto}'). Prova con il ticker ufficiale (es. per Milano aggiungi .MI, come ENEL.MI).")
         st.stop()
 
-    nome_azienda = info.get("shortName", ticker_input)
+    nome_azienda = info.get("shortName") or info.get("longName") or ticker_risolto
     valuta = info.get("currency", "EUR")
     prezzo_attuale = info.get("currentPrice") or info.get("regularMarketPrice") or storico['Close'].iloc[-1]
 
     # 1. CONSENSUS DEGLI ANALISTI E METRICHE FONDAMENTALI
-    st.subheader(f"📌 {nome_azienda} ({ticker_input}) — Consensus & Valutazioni di Mercato")
+    st.subheader(f"📌 {nome_azienda} ({ticker_risolto}) — Valutazioni & Consensus")
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
     col_m1.metric("Prezzo Attuale", f"{prezzo_attuale:.2f} {valuta}")
     
@@ -342,14 +375,14 @@ if st.button("🚀 Avvia Analisi Completa", type="primary", use_container_width=
 
     # 2. GRAFICO CANDLESTICK + MEDIE MOBILI + VOLUMI
     st.markdown("---")
-    st.subheader("📈 Grafico di Mercato")
+    st.subheader("📈 Grafico Storico con Medie Mobili e Volumi")
     df_tecnico = calcola_indicatori(storico)
-    grafico = crea_grafico_candele(df_tecnico, ticker_input)
+    grafico = crea_grafico_candele(df_tecnico, ticker_risolto)
     st.plotly_chart(grafico, use_container_width=True)
 
     # 3. NOTIZIE SCANSIONATE SUI DOMINI AUTORIZZATI
     st.markdown("---")
-    st.subheader("📰 Ultime Notizie Rilevate dalle Fonti Autorizzate")
+    st.subheader("📰 Ultime Notizie dalle Fonti Istituzionali Autorizzate")
     notizie_trovate = estrai_notizie_filtrate(nome_azienda, domini_attivi)
     
     if notizie_trovate:
@@ -358,14 +391,14 @@ if st.button("🚀 Avvia Analisi Completa", type="primary", use_container_width=
             with (col_n1 if idx % 2 == 0 else col_n2):
                 st.markdown(f"• **[{n['titolo']}]({n['link']})**")
     else:
-        st.info("Nessuna notizia recente rilevata sui domini specifici delle fonti attualmente attivate.")
+        st.info("Nessuna notizia recente rilevata sui domini specifici selezionati nella Knowledge Base.")
 
     # 4. REPORT QUALITATIVO TRAMITE GEMINI-3.8-FLASH
     st.markdown("---")
-    st.subheader("🧠 Report Strategico & Formativo")
+    st.subheader("🧠 Report Strategico & Glossario Formativo")
     
     prompt_report = f"""
-    Titolo in analisi: {nome_azienda} ({ticker_input})
+    Titolo in analisi: {nome_azienda} ({ticker_risolto})
     Prezzo di Mercato: {prezzo_attuale} {valuta}
     Consensus Ufficiale: {recommendation} | Target Price Medio: {target_mean} {valuta}
     
@@ -373,11 +406,11 @@ if st.button("🚀 Avvia Analisi Completa", type="primary", use_container_width=
     {', '.join(fonti_attive_nomi[:30])}
     
     Rassegna Notizie dai domini autorizzati:
-    {chr(10).join(['- ' + n['titolo'] for n in notizie_trovate]) if notizie_trovate else 'Nessuna notizia rilevante.'}
+    {chr(10).join(['- ' + n['titolo'] for n in notizie_trovate]) if notizie_trovate else 'Nessuna notizia recente.'}
     
-    Svolgi un'analisi strutturata ad uso di un investitore non professionale, articolando la risposta in 3 sezioni:
-    1. CONTESTO STRATEGICO E POSIZIONAMENTO INDUSTRIALE: Descrivi le linee di business e le dinamiche competitive settoriali.
-    2. MAPPA DEI FATTORI DI RISCHIO: Identifica i rischi operativi, tassi, regolatori o macroeconomici evidenziati dalla ricerca di settore.
+    Svolgi un'analisi strutturata per un piccolo investitore, articolando la risposta in 3 sezioni:
+    1. CONTESTO STRATEGICO E POSIZIONAMENTO INDUSTRIALE: Descrivi le linee di business e il posizionamento competitivo del titolo.
+    2. MAPPA DEI FATTORI DI RISCHIO: Identifica i principali rischi operativi, regolatori, di tassi o macroeconomici evidenziati dalla ricerca di settore.
     3. GLOSSARIO PER IL PICCOLO INVESTITORE: Spiega in modo chiaro e comprensibile 3 concetti o metriche finanziarie chiave applicate a questo titolo.
     
     Attieniti unicamente al contesto qualitativo e formativo senza formulare raccomandazioni operative personalizzate.
@@ -389,7 +422,7 @@ if st.button("🚀 Avvia Analisi Completa", type="primary", use_container_width=
 
     # 5. ESPORTAZIONE REPORT
     st.markdown("---")
-    export_md = f"""# REPORT STRATEGICO: {nome_azienda} ({ticker_input})
+    export_md = f"""# REPORT STRATEGICO: {nome_azienda} ({ticker_risolto})
 Data Elaborazione: {time.strftime('%Y-%m-%d %H:%M:%S')}
 Prezzo: {prezzo_attuale} {valuta}
 Target Price: {target_mean} {valuta}
@@ -401,6 +434,6 @@ Consensus: {recommendation}
     st.download_button(
         label="📥 Esporta Report Completo (.md)",
         data=export_md,
-        file_name=f"Report_{ticker_input}_{time.strftime('%Y%m%d')}.md",
+        file_name=f"Report_{ticker_risolto}_{time.strftime('%Y%m%d')}.md",
         mime="text/markdown"
     )
