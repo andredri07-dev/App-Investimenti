@@ -154,7 +154,7 @@ FONTI_KB = {
 }
 
 # -----------------------------------------------------------------------------
-# 1. RISOLUZIONE TICKER E RECUPERO BILANCIO
+# 1. RISOLUZIONE TICKER E DATI CONTABILI GREZZI
 # -----------------------------------------------------------------------------
 def risolvi_simbolo_ticker(testo_ricerca):
     query = testo_ricerca.strip()
@@ -184,7 +184,7 @@ def scarica_dati_contabili_mercato(ticker_simbolo, periodo_selezionato):
     return storico, info
 
 # -----------------------------------------------------------------------------
-# 2. CALCOLO DETERMINISTICO IN PYTHON (Zero calcoli numerici via AI)
+# 2. MOTORE DI CALCOLO INTERNO (Zero formule o numeri inventati dall'AI)
 # -----------------------------------------------------------------------------
 def calcola_metriche_proprietarie(storico, info):
     if storico.empty:
@@ -192,15 +192,19 @@ def calcola_metriche_proprietarie(storico, info):
     
     prezzo_reale = float(storico['Close'].iloc[-1])
     
+    # Calcolo P/E Reale su Utili per Azione (EPS)
     eps = info.get("trailingEps") or info.get("forwardEps")
     pe_calcolato = round(prezzo_reale / eps, 2) if (eps and eps > 0) else None
     
+    # Calcolo Price to Book Value (P/BV) su Patrimonio Netto
     book_value = info.get("bookValue")
     pbv_calcolato = round(prezzo_reale / book_value, 2) if (book_value and book_value > 0) else None
     
+    # Dividend Yield Reale
     ultimo_dividendo = info.get("dividendRate") or 0.0
     div_yield_calcolato = round((ultimo_dividendo / prezzo_reale) * 100, 2) if (prezzo_reale and ultimo_dividendo > 0) else None
 
+    # Medie Mobili e Volatilità
     df = storico.copy()
     df['SMA20'] = df['Close'].rolling(window=20).mean()
     df['SMA50'] = df['Close'].rolling(window=50).mean()
@@ -252,7 +256,7 @@ def crea_grafico_candele(df, ticker_simbolo):
     ), row=2, col=1)
     
     fig.update_layout(
-        title=f"Analisi Grafica Interattiva: {ticker_simbolo}",
+        title=f"Analisi Tecnica: {ticker_simbolo}",
         xaxis_rangeslider_visible=True,
         xaxis_rangeslider_thickness=0.05,
         height=560,
@@ -284,9 +288,9 @@ def estrai_notizie_filtrate(query_nome, domini_autorizzati):
     return notizie
 
 # -----------------------------------------------------------------------------
-# 4. CHIAMATA A MODELLI GENERAZIONE 3.8 (gemini-3.8-flash e gemini-3.8-pro)
+# 4. CHIAMATA A GEMINI-3.8-FLASH CON PROTEZIONE ANTI-CONGESTIONE
 # -----------------------------------------------------------------------------
-def esegui_analisi_generazione_38(nome_azienda, ticker_simbolo, prezzo_reale, valuta, pe_calc, pbv_calc, fonti_attive, notizie, api_key):
+def esegui_analisi_38_flash(nome_azienda, ticker_simbolo, prezzo_reale, valuta, pe_calc, pbv_calc, fonti_attive, notizie, api_key):
     client = genai.Client(api_key=api_key)
     
     system_inst = (
@@ -299,13 +303,13 @@ def esegui_analisi_generazione_38(nome_azienda, ticker_simbolo, prezzo_reale, va
         "senza inserire domande aperte o raccomandazioni operative personalizzate."
     )
     
-    # Sintesi essenziale delle fonti per abbattere il peso dei token e non innescare il 503
-    fonti_sintetiche = ", ".join(fonti_attive[:35])
+    # Selezione mirata delle fonti attive per evitare payload sovradimensionati che innescano il 503
+    fonti_sintetiche = ", ".join(fonti_attive[:30])
     
     prompt = f"""
     Titolo in analisi: {nome_azienda} ({ticker_simbolo})
     Prezzo Reale di Borsa: {prezzo_reale} {valuta}
-    Multipli Calcolati dal Sistema: P/E: {pe_calc} | P/BV: {pbv_calc}
+    Multipli Calcolati: P/E: {pe_calc} | P/BV: {pbv_calc}
     
     Fonti Istituzionali selezionate dall'utente (Knowledge Base):
     {fonti_sintetiche}
@@ -343,31 +347,29 @@ def esegui_analisi_generazione_38(nome_azienda, ticker_simbolo, prezzo_reale, va
        - Spiega ciascun termine con limpidezza pedagogica, illustrando esattamente come l'investitore retail deve interpretarlo nell'analisi concreta di questo titolo.
     """
     
-    # Utilizza unicamente modelli di generazione 3.8
-    modelli_38 = ["gemini-3.8-flash", "gemini-3.8-pro"]
-    
-    for modello in modelli_38:
-        for tentativo in range(3):
-            try:
-                risposta = client.models.generate_content(
-                    model=modello,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.15,
-                        system_instruction=system_inst
-                    )
+    # 5 tentativi progressivi con jitter esponenziale su gemini-3.8-flash
+    max_tentativi = 5
+    for tentativo in range(max_tentativi):
+        try:
+            risposta = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.15,
+                    system_instruction=system_inst
                 )
-                return risposta.text, modello
-            except APIError as e:
-                if e.code in [503, 429] or "503" in str(e):
-                    # Pausa intelligente con jitter per smaltire il carico
-                    time.sleep(2.0 * (2 ** tentativo) + random.uniform(1.0, 2.5))
-                else:
-                    return f"Errore API Google ({e.code}): {str(e)}", None
-            except Exception as e:
-                return f"Errore imprevisto: {str(e)}", None
-                
-    return "I server gratuiti per la serie Gemini 3.8 sono momentaneamente congestionati. Riprova tra circa 30 secondi.", None
+            )
+            return risposta.text
+        except APIError as e:
+            if e.code in [503, 429] or "503" in str(e):
+                tempo_attesa = 2.0 * (1.8 ** tentativo) + random.uniform(0.5, 2.0)
+                time.sleep(tempo_attesa)
+            else:
+                return f"Errore API Google ({e.code}): {str(e)}"
+        except Exception as e:
+            return f"Errore imprevisto durante l'analisi: {str(e)}"
+            
+    return "I server gratuiti per gemini-3.8-flash sono momentaneamente congestionati. Riprova tra 30 secondi."
 
 # -----------------------------------------------------------------------------
 # INTERFACCIA STREAMLIT
@@ -445,14 +447,14 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
 
     notizie_trovate = estrai_notizie_filtrate(nome_azienda, domini_attivi)
 
-    with st.spinner("Elaborazione report qualitativo e stima Consensus con Gemini 3.8..."):
-        testo_risposta, modello_usato = esegui_analisi_generazione_38(
+    with st.spinner("Elaborazione report qualitativo e stima Consensus con gemini-3.8-flash..."):
+        testo_risposta = esegui_analisi_38_flash(
             nome_azienda, ticker_risolto, prezzo_reale, valuta,
             metriche.get("pe_calcolato"), metriche.get("pbv_calcolato"),
             fonti_attive, notizie_trovate, api_key
         )
 
-    # Estrazione forchetta valutativa dal testo generato
+    # Estrazione della forchetta valutativa
     consensus_calc = {
         "rating": "ACCUMULATE",
         "target_medio": round(prezzo_reale * 1.12, 2),
@@ -518,7 +520,7 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
 
     # SEZIONE 4: REPORT QUALITATIVO & DIZIONARIO TECNICO SPECIALISTICO
     st.markdown("---")
-    st.subheader(f"🧠 Report Strategico Istituzionale (Elaborato con {modello_usato or 'Gemini 3.8'})")
+    st.subheader("🧠 Report Strategico Istituzionale (Elaborato con gemini-3.8-flash)")
     st.markdown(report_pulito)
 
     # SEZIONE 5: ESPORTAZIONE REPORT
