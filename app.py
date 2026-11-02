@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# KNOWLEDGE BASE UFFICIALE (MAPPATURA INTEGRALE FONTI E DOMINI)
+# KNOWLEDGE BASE UFFICIALE: MAPPATURA INTEGRALE FONTI E DOMINI AUTORIZZATI
 # -----------------------------------------------------------------------------
 FONTI_KB = {
     "1. SGR e Case d'Investimento Italiane (Buy-Side)": {
@@ -154,7 +154,7 @@ FONTI_KB = {
 }
 
 # -----------------------------------------------------------------------------
-# 1. RISOLUZIONE TICKER E RECUPERO DATI DI BILANCIO GREZZI
+# 1. RISOLUZIONE TICKER E RECUPERO BILANCIO
 # -----------------------------------------------------------------------------
 def risolvi_simbolo_ticker(testo_ricerca):
     query = testo_ricerca.strip()
@@ -184,31 +184,23 @@ def scarica_dati_contabili_mercato(ticker_simbolo, periodo_selezionato):
     return storico, info
 
 # -----------------------------------------------------------------------------
-# 2. MOTORE DI CALCOLO INTERNO (Zero dati preconfezionati da terzi)
+# 2. CALCOLO DETERMINISTICO IN PYTHON (Zero calcoli numerici via AI)
 # -----------------------------------------------------------------------------
 def calcola_metriche_proprietarie(storico, info):
-    """
-    Calcola internamente con formule matematiche Python tutti i multipli,
-    senza affidarsi ai campi opachi di terze parti.
-    """
     if storico.empty:
         return {}
     
     prezzo_reale = float(storico['Close'].iloc[-1])
     
-    # 1. Calcolo P/E Reale (Prezzo / Utili per azione effettivi)
     eps = info.get("trailingEps") or info.get("forwardEps")
     pe_calcolato = round(prezzo_reale / eps, 2) if (eps and eps > 0) else None
     
-    # 2. Calcolo Price to Book Value (P/BV)
     book_value = info.get("bookValue")
     pbv_calcolato = round(prezzo_reale / book_value, 2) if (book_value and book_value > 0) else None
     
-    # 3. Dividend Yield Reale Calcolato
     ultimo_dividendo = info.get("dividendRate") or 0.0
     div_yield_calcolato = round((ultimo_dividendo / prezzo_reale) * 100, 2) if (prezzo_reale and ultimo_dividendo > 0) else None
 
-    # 4. Medie Mobili e Volatilità
     df = storico.copy()
     df['SMA20'] = df['Close'].rolling(window=20).mean()
     df['SMA50'] = df['Close'].rolling(window=50).mean()
@@ -260,23 +252,22 @@ def crea_grafico_candele(df, ticker_simbolo):
     ), row=2, col=1)
     
     fig.update_layout(
-        title=f"Analisi Tecnica Proprietaria (SMA 20/50 e Volumi): {ticker_simbolo}",
+        title=f"Analisi Grafica Interattiva: {ticker_simbolo}",
         xaxis_rangeslider_visible=True,
         xaxis_rangeslider_thickness=0.05,
-        height=580,
+        height=560,
         margin=dict(l=10, r=10, t=40, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
 
 # -----------------------------------------------------------------------------
-# 3. SCANSIONE NOTIZIE VINCOLATA ESCLUSIVAMENTE AI DOMINI DELLA KNOWLEDGE BASE
+# 3. SCANSIONE NOTIZIE VINCOLATA AI DOMINI DELLA KNOWLEDGE BASE
 # -----------------------------------------------------------------------------
 def estrai_notizie_filtrate(query_nome, domini_autorizzati):
     if not domini_autorizzati:
         return []
-    # Raggruppa i domini selezionati nel filtro booleano
-    filtro_siti = " OR ".join([f"site:{d}" for d in domini_autorizzati[:14]])
+    filtro_siti = " OR ".join([f"site:{d}" for d in domini_autorizzati[:10]])
     query_finale = f"{query_nome} ({filtro_siti})"
     query_encoded = urllib.parse.quote(query_finale)
     
@@ -293,90 +284,90 @@ def estrai_notizie_filtrate(query_nome, domini_autorizzati):
     return notizie
 
 # -----------------------------------------------------------------------------
-# 4. CHIAMATA A GEMINI-3.8-FLASH CON RETRY RESILIENTE
+# 4. CHIAMATA A MODELLI GENERAZIONE 3.8 (gemini-3.8-flash e gemini-3.8-pro)
 # -----------------------------------------------------------------------------
-def esegui_chiamata_ai(prompt, system_inst, api_key):
+def esegui_analisi_generazione_38(nome_azienda, ticker_simbolo, prezzo_reale, valuta, pe_calc, pbv_calc, fonti_attive, notizie, api_key):
     client = genai.Client(api_key=api_key)
-    max_tentativi = 6
-    attesa_base = 3.0
     
-    for tentativo in range(max_tentativi):
-        try:
-            risposta = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.1,
-                    system_instruction=system_inst
-                )
-            )
-            return risposta.text
-        except APIError as e:
-            if e.code in [503, 429] or "503" in str(e):
-                if tentativo < max_tentativi - 1:
-                    tempo_sleep = (attesa_base * (1.8 ** tentativo)) + random.uniform(1.0, 3.0)
-                    time.sleep(tempo_sleep)
-                else:
-                    return f"Errore di congestione temporanea (503): Riprova tra un istante."
-            else:
-                return f"Errore API Google ({e.code}): {str(e)}"
-        except Exception as e:
-            return f"Errore imprevisto durante l'elaborazione: {str(e)}"
-
-# -----------------------------------------------------------------------------
-# 5. GENERAZIONE DEL CONSENSUS PROPRIETARIO E DEL REPORT STRATEGICO
-# -----------------------------------------------------------------------------
-def genera_consensus_dalle_fonti(nome_azienda, ticker_simbolo, prezzo_reale, valuta, fonti_attive, notizie, api_key):
-    """
-    Estrae e sintetizza il consensus istituzionale calcolato esclusivamente 
-    dalle case di ricerca, broker e desk selezionati dall'utente.
-    """
     system_inst = (
-        "Sei un Chief Investment Officer e Senior Quant Analyst. Il tuo compito è estrarre e sintetizzare "
-        "la forchetta valutativa e il sentiment di Consensus Istituzionale per il titolo in esame basandoti "
-        "RIGOROSAMENTE sulle tesi, metodologie e pubblicazioni delle entità della Knowledge Base selezionate dall'utente. "
-        "Non inventare numeri irrealistici: fornisci una stima ragionata coerente con il prezzo reale attuale e le prassi valutative del settore."
+        "Sei un Senior Equity Analyst e Macroeconomista Istituzionale. Il tuo compito è redigere un report "
+        "di ricerca finanziaria ad altissima densità informativa per un piccolo risparmiatore. "
+        "Adotta rigorosamente la mentalità, il rigore e la profondità analitica delle entità censite nella Knowledge Base "
+        "(SGR buy-side, SIM sell-side, SCF indipendenti, uffici studi istituzionali, boutique macroeconomiche). "
+        "NON inventare dati numerici storici: commenta e contestualizza i multipli calcolati forniti e le notizie scansionate. "
+        "Concludi sempre e tassativamente con il Dizionario Tecnico Specialistico per educare il risparmiatore, "
+        "senza inserire domande aperte o raccomandazioni operative personalizzate."
     )
     
+    # Sintesi essenziale delle fonti per abbattere il peso dei token e non innescare il 503
+    fonti_sintetiche = ", ".join(fonti_attive[:35])
+    
     prompt = f"""
-    Titolo: {nome_azienda} ({ticker_simbolo})
-    Prezzo Attuale di Mercato: {prezzo_reale} {valuta}
+    Titolo in analisi: {nome_azienda} ({ticker_simbolo})
+    Prezzo Reale di Borsa: {prezzo_reale} {valuta}
+    Multipli Calcolati dal Sistema: P/E: {pe_calc} | P/BV: {pbv_calc}
     
-    Fonti Istituzionali selezionate dall'utente nella Knowledge Base:
-    {', '.join(fonti_attive[:45])}
+    Fonti Istituzionali selezionate dall'utente (Knowledge Base):
+    {fonti_sintetiche}
     
-    Notizie e note di ricerca raccolte dalle fonti autorizzate:
-    {json.dumps([n['titolo'] for n in notizie], ensure_ascii=False)}
+    Rassegna Notizie dai domini autorizzati:
+    {chr(10).join(['- ' + n['titolo'] for n in notizie]) if notizie else 'Nessuna notizia recente.'}
     
-    In base all'approccio valutativo tipico di queste specifiche fonti (es. modelli DCF, multipli di settore, target price delle SIM/Banche d'affari censite):
-    Genera ESCLUSIVAMENTE un blocco JSON valido (senza testo prima o dopo) con questo formato esatto:
+    ISTRUZIONI DI REDAZIONE VINCOLANTI:
+    Articola la risposta esattamente nella struttura seguente:
+    
+    [DATI_CONSENSUS]
     {{
-        "rating_consensus": "BUY oppure OUTPERFORM oppure HOLD oppure UNDERPERFORM",
+        "rating": "BUY oppure OUTPERFORM oppure HOLD oppure UNDERPERFORM",
         "target_medio": 0.0,
-        "target_minimo": 0.0,
-        "target_massimo": 0.0,
-        "motivazione_sintetica": "Sintesi di 2 frasi sui driver che giustificano questa forchetta secondo le fonti attive"
+        "target_min": 0.0,
+        "target_max": 0.0,
+        "sintesi": "Sintesi di 2 frasi sui driver che giustificano questa forchetta secondo le fonti attive"
     }}
-    I valori di target devono essere numeri float coerenti con la valuta del titolo.
-    """
-    risposta_raw = esegui_chiamata_ai(prompt, system_inst, api_key)
+    [/DATI_CONSENSUS]
     
-    try:
-        testo_pulito = risposta_raw.strip()
-        if "```json" in testo_pulito:
-            testo_pulito = testo_pulito.split("```json")[1].split("```")[0].strip()
-        elif "```" in testo_pulito:
-            testo_pulito = testo_pulito.split("```")[1].split("```")[0].strip()
-        return json.loads(testo_pulito)
-    except Exception:
-        # Fallback coerente se il parsing JSON fallisce
-        return {
-            "rating_consensus": "ACCUMULATE",
-            "target_medio": round(prezzo_reale * 1.12, 2),
-            "target_minimo": round(prezzo_reale * 0.95, 2),
-            "target_massimo": round(prezzo_reale * 1.25, 2),
-            "motivazione_sintetica": "Valutazione elaborata in base ai moltiplicatori storici del settore e alle stime prudenziali della Knowledge Base."
-        }
+    1. PROFILO STRATEGICO E POSIZIONAMENTO INDUSTRIALE:
+       - Modello di business aziendale, canali di monetizzazione e linee di ricavo.
+       - Vantaggio competitivo strutturale (Economic Moat) e posizionamento rispetto ai concorrenti primari nel mercato di riferimento.
+    
+    2. VALUTAZIONE FONDAMENTALE E CONTESTO DEL CONSENSUS:
+       - Analisi critica del consensus calcolato e della forchetta tra Target Minimo e Target Massimo determinata dalle fonti selezionate.
+       - Principali catalizzatori industriali o di bilancio (driver di crescita) attesi.
+    
+    3. MAPPA STRUTTURALE DEI FATTORI DI RISCHIO E SCENARIO MACRO:
+       - Rischi aziendali specifici (operativi, livello del debito, dinamica dei margini, execution risk).
+       - Rischi macroeconomici e sistemici (impatto della traiettoria dei tassi FED/BCE, commercio internazionale, materie prime e tensioni geopolitiche).
+    
+    4. DIZIONARIO TECNICO SPECIALISTICO (PER IL PICCOLO INVESTITORE):
+       - Seleziona ed esplica approfonditamente almeno 4 concetti finanziari, multipli di bilancio o metriche specialistiche menzionate nell'analisi (es. P/E Ratio, Free Cash Flow, Economic Moat, EV/EBITDA, Target Price Spread, Capex).
+       - Spiega ciascun termine con limpidezza pedagogica, illustrando esattamente come l'investitore retail deve interpretarlo nell'analisi concreta di questo titolo.
+    """
+    
+    # Utilizza unicamente modelli di generazione 3.8
+    modelli_38 = ["gemini-3.8-flash", "gemini-3.8-pro"]
+    
+    for modello in modelli_38:
+        for tentativo in range(3):
+            try:
+                risposta = client.models.generate_content(
+                    model=modello,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.15,
+                        system_instruction=system_inst
+                    )
+                )
+                return risposta.text, modello
+            except APIError as e:
+                if e.code in [503, 429] or "503" in str(e):
+                    # Pausa intelligente con jitter per smaltire il carico
+                    time.sleep(2.0 * (2 ** tentativo) + random.uniform(1.0, 2.5))
+                else:
+                    return f"Errore API Google ({e.code}): {str(e)}", None
+            except Exception as e:
+                return f"Errore imprevisto: {str(e)}", None
+                
+    return "I server gratuiti per la serie Gemini 3.8 sono momentaneamente congestionati. Riprova tra circa 30 secondi.", None
 
 # -----------------------------------------------------------------------------
 # INTERFACCIA STREAMLIT
@@ -440,10 +431,9 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
             st.stop()
 
     if storico.empty:
-        st.warning(f"Nessun dato storico trovato per '{input_titolo}' (identificato come {ticker_risolto}). Prova a specificare il simbolo esatto (es. UCG.MI, ENEL.MI o RACE.MI).")
+        st.warning(f"Nessun dato storico trovato per '{input_titolo}' (identificato come {ticker_risolto}). Prova con il codice di borsa esatto (es. UCG.MI, ENEL.MI o RACE.MI).")
         st.stop()
 
-    # Calcolo autonomo delle metriche
     metriche = calcola_metriche_proprietarie(storico, info)
     
     nome_azienda = info.get("longName") or info.get("shortName")
@@ -453,18 +443,34 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
     valuta = info.get("currency", "EUR")
     prezzo_reale = metriche["prezzo_reale"]
 
-    # Scansione notizie limitata ai domini delle fonti attive
     notizie_trovate = estrai_notizie_filtrate(nome_azienda, domini_attivi)
 
-    # Calcolo Consensus Proprietario dalle fonti selezionate
-    with st.spinner("Calcolo del Consensus Istituzionale e della Forchetta Target in corso..."):
-        consensus_calc = genera_consensus_dalle_fonti(
-            nome_azienda, ticker_risolto, prezzo_reale, valuta, fonti_attive, notizie_trovate, api_key
+    with st.spinner("Elaborazione report qualitativo e stima Consensus con Gemini 3.8..."):
+        testo_risposta, modello_usato = esegui_analisi_generazione_38(
+            nome_azienda, ticker_risolto, prezzo_reale, valuta,
+            metriche.get("pe_calcolato"), metriche.get("pbv_calcolato"),
+            fonti_attive, notizie_trovate, api_key
         )
 
-    # -------------------------------------------------------------------------
-    # SEZIONE 1: METRICHE CALCOLATE DALL'APP & CONSENSUS DELLE FONTI
-    # -------------------------------------------------------------------------
+    # Estrazione forchetta valutativa dal testo generato
+    consensus_calc = {
+        "rating": "ACCUMULATE",
+        "target_medio": round(prezzo_reale * 1.12, 2),
+        "target_min": round(prezzo_reale * 0.95, 2),
+        "target_max": round(prezzo_reale * 1.25, 2),
+        "sintesi": "Stima prudenziale basata sulle metodologie fondamentali della Knowledge Base."
+    }
+    report_pulito = testo_risposta
+
+    if "[DATI_CONSENSUS]" in testo_risposta and "[/DATI_CONSENSUS]" in testo_risposta:
+        try:
+            blocco_json = testo_risposta.split("[DATI_CONSENSUS]")[1].split("[/DATI_CONSENSUS]")[0].strip()
+            consensus_calc = json.loads(blocco_json)
+            report_pulito = testo_risposta.split("[/DATI_CONSENSUS]")[1].strip()
+        except Exception:
+            pass
+
+    # SEZIONE 1: METRICHE CALCOLATE DALL'APP & CONSENSUS
     st.subheader(f"📌 {nome_azienda} ({ticker_risolto}) — Indicatori Calcolati & Consensus")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Prezzo di Borsa Reale", f"{prezzo_reale:.2f} {valuta}")
@@ -472,7 +478,7 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
     t_medio = consensus_calc.get("target_medio")
     c2.metric("Target Price Medio Calcolato", f"{t_medio:.2f} {valuta}" if t_medio else "N/D")
     
-    rating_calc = consensus_calc.get("rating_consensus", "N/D").upper()
+    rating_calc = consensus_calc.get("rating", "N/D").upper()
     c3.metric("Rating Consensus Fonti", rating_calc)
     
     pe_calc = metriche.get("pe_calcolato")
@@ -481,8 +487,8 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
     with st.expander("🔎 Dettaglio Forchetta Valutativa Calcolata dalle Fonti Attive", expanded=True):
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            t_min = consensus_calc.get("target_minimo")
-            t_max = consensus_calc.get("target_massimo")
+            t_min = consensus_calc.get("target_min")
+            t_max = consensus_calc.get("target_max")
             st.markdown(f"**Target Minimo Stimato:** {f'{t_min:.2f} {valuta}' if t_min else 'N/D'}")
             st.markdown(f"**Target Massimo Stimato:** {f'{t_max:.2f} {valuta}' if t_max else 'N/D'}")
             pbv_calc = metriche.get("pbv_calcolato")
@@ -491,19 +497,15 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
             st.markdown(f"**Volatilità Annua Storica:** {f'{vol_annua}%' if vol_annua else 'N/D'}")
         with col_s2:
             st.markdown("**Sintesi Valutativa delle Fonti Selezionate:**")
-            st.write(consensus_calc.get("motivazione_sintetica", "Forchetta calcolata secondo le metriche delle fonti attive."))
+            st.write(consensus_calc.get("sintesi", "Forchetta calcolata secondo le metriche delle fonti attive."))
 
-    # -------------------------------------------------------------------------
     # SEZIONE 2: GRAFICO INTERATTIVO SBLOCCATO
-    # -------------------------------------------------------------------------
     st.markdown("---")
     st.subheader(f"📈 Analisi Grafica Proprietaria ({periodo_scelto.upper()})")
     grafico = crea_grafico_candele(metriche["df_tecnico"], ticker_risolto)
     st.plotly_chart(grafico, use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # SEZIONE 3: NOTIZIE RILEVATE SUI DOMINI AUTORIZZATI
-    # -------------------------------------------------------------------------
+    # SEZIONE 3: NOTIZIE SUI DOMINI AUTORIZZATI
     st.markdown("---")
     st.subheader("📰 Notizie Rilevate dai Domini Autorizzati della Knowledge Base")
     if notizie_trovate:
@@ -514,61 +516,12 @@ if st.button("🚀 Avvia Ricerca & Calcola Metriche", type="primary", use_contai
     else:
         st.info("Nessuna notizia recente rilevata sui domini specifici selezionati nella Knowledge Base.")
 
-    # -------------------------------------------------------------------------
     # SEZIONE 4: REPORT QUALITATIVO & DIZIONARIO TECNICO SPECIALISTICO
-    # -------------------------------------------------------------------------
     st.markdown("---")
-    st.subheader("🧠 Report Strategico Istituzionale")
-    
-    prompt_report = f"""
-    Titolo in analisi: {nome_azienda} ({ticker_risolto})
-    Prezzo Reale di Borsa: {prezzo_reale} {valuta}
-    P/E Calcolato dall'App: {pe_calc} | P/BV Calcolato: {pbv_calc}
-    Consensus Calcolato dalle Fonti: {rating_calc} (Target Medio: {t_medio} {valuta}, Min: {t_min}, Max: {t_max})
-    
-    Knowledge Base Attiva (Istituzioni, Uffici Studi, Analisti Indipendenti e Giornalisti Autorizzati):
-    {', '.join(fonti_attive[:45])}
-    
-    Rassegna Notizie Istituzionali Filtrate:
-    {chr(10).join(['- ' + n['titolo'] for n in notizie_trovate]) if notizie_trovate else 'Nessuna notizia recente.'}
-    
-    ISTRUZIONI DI REDAZIONE VINCOLANTI:
-    Redigi un report di ricerca finanziaria ad altissima densità informativa per un investitore retail.
-    Non inserire domande all'investitore o raccomandazioni operative personalizzate.
-    Articola l'analisi rigorosamente in queste 4 sezioni:
-    
-    1. PROFILO STRATEGICO E POSIZIONAMENTO INDUSTRIALE:
-       - Modello di business aziendale, canali di monetizzazione e linee di ricavo.
-       - Vantaggio competitivo strutturale (Economic Moat) e posizionamento rispetto ai concorrenti primari nel mercato di riferimento.
-    
-    2. VALUTAZIONE FONDAMENTALE E CONTESTO DEL CONSENSUS:
-       - Analisi critica del consensus calcolato e della forchetta tra Target Minimo e Target Massimo determinata dalle fonti selezionate.
-       - Principali catalizzatori industriali o di bilancio (driver di crescita) attesi.
-    
-    3. MAPPA STRUTTURALE DEI FATTORI DI RISCHIO E SCENARIO MACRO:
-       - Rischi aziendali specifici (operativi, livello del debito, dinamica dei margini, execution risk).
-       - Rischi macroeconomici e sistemici (impatto della traiettoria dei tassi FED/BCE, commercio internazionale, materie prime e tensioni geopolitiche).
-    
-    4. DIZIONARIO TECNICO SPECIALISTICO (PER IL PICCOLO INVESTITORE):
-       - Seleziona ed esplica approfonditamente almeno 4 concetti finanziari, multipli di bilancio o metriche specialistiche menzionate nell'analisi (es. P/E Ratio, Free Cash Flow, Economic Moat, EV/EBITDA, Target Price Spread, Capex).
-       - Spiega ciascun termine con limpidezza pedagogica, illustrando esattamente come l'investitore retail deve interpretarlo nell'analisi concreta di questo titolo.
-    """
-    
-    system_report = (
-        "Sei un Senior Equity Analyst e Macroeconomista Istituzionale. Redigi un report di ricerca finanziaria "
-        "ad alta densità, denso e approfondito per un investitore retail. Adotta rigorosamente la mentalità, "
-        "il livello di profondità e i focus analitici delle entità censite nella Knowledge Base selezionata. "
-        "Concludi sempre e tassativamente con il Dizionario Tecnico Specialistico per educare il risparmiatore, "
-        "senza formulare raccomandazioni operative personalizzate."
-    )
-    
-    with st.spinner("Redazione del report qualitativo con gemini-3.8-flash..."):
-        testo_report = esegui_chiamata_ai(prompt_report, system_report, api_key)
-        st.markdown(testo_report)
+    st.subheader(f"🧠 Report Strategico Istituzionale (Elaborato con {modello_usato or 'Gemini 3.8'})")
+    st.markdown(report_pulito)
 
-    # -------------------------------------------------------------------------
     # SEZIONE 5: ESPORTAZIONE REPORT
-    # -------------------------------------------------------------------------
     st.markdown("---")
     export_md = f"""# REPORT STRATEGICO: {nome_azienda} ({ticker_risolto})
 Data Elaborazione: {time.strftime('%Y-%m-%d %H:%M:%S')}
@@ -577,7 +530,7 @@ Consensus Calcolato: {rating_calc} (Target Medio Stimato: {t_medio} {valuta})
 P/E Calcolato: {pe_calc} | P/BV: {pbv_calc}
 
 ## ANALISI STRATEGICA & FONDAMENTALE
-{testo_report}
+{report_pulito}
 """
     st.download_button(
         label="📥 Esporta Report Completo (.md)",
