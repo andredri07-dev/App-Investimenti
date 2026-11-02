@@ -5,6 +5,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import feedparser
 import time
+import random
 import requests
 import urllib.parse
 from google import genai
@@ -20,7 +21,7 @@ st.set_page_config(
 
 # -----------------------------------------------------------------------------
 # KNOWLEDGE BASE UFFICIALE: MAPPATURA INTEGRALE FONTI E DOMINI AUTORIZZATI
-# Estratta fedelmente dal documento: 20261020_ Knowledge Base - Fonti Finanziarie
+# Estratta fedelmente dalla Knowledge Base (Fonti Finanziarie)
 # -----------------------------------------------------------------------------
 FONTI_KB = {
     "1. SGR e Case d'Investimento Italiane (Buy-Side)": {
@@ -153,7 +154,7 @@ FONTI_KB = {
 }
 
 # -----------------------------------------------------------------------------
-# FUNZIONI QUANTITATIVE (Librerie Dati Dedicate, Zero Allucinazioni)
+# FUNZIONI QUANTITATIVE DETERMINISTICHE (Zero Allucinazioni da LLM)
 # -----------------------------------------------------------------------------
 def risolvi_simbolo_ticker(testo_ricerca):
     query = testo_ricerca.strip()
@@ -248,7 +249,6 @@ def crea_grafico_candele(df, ticker_simbolo):
         name="Volume"
     ), row=2, col=1)
     
-    # Range Slider e Zoom liberi
     fig.update_layout(
         title=f"Grafico Interattivo con SMA 20/50 e Volumi: {ticker_simbolo}",
         xaxis_rangeslider_visible=True,
@@ -282,12 +282,22 @@ def estrai_notizie_filtrate(query_nome, domini_autorizzati):
     return notizie
 
 # -----------------------------------------------------------------------------
-# CHIAMATA QUALITATIVA A GEMINI-3.8-FLASH CON RETRY E BACKOFF AUTOMATICO
+# MOTORE AI: GEMINI-3.8-FLASH CON RETRY RESILIENTE ED EXPONENTIAL BACKOFF
 # -----------------------------------------------------------------------------
 def genera_report_qualitativo(prompt, api_key):
     client = genai.Client(api_key=api_key)
-    max_tentativi = 5
-    attesa = 2.0
+    max_tentativi = 6
+    attesa_base = 3.0
+    
+    system_inst = (
+        "Sei un Senior Equity Analyst e Macroeconomista Istituzionale. Il tuo compito è redigere un report "
+        "di ricerca ad altissima densità informativa per un piccolo risparmiatore. "
+        "Adotta rigorosamente la mentalità, il livello di profondità e i focus analitici delle entità censite nella Knowledge Base "
+        "(SGR buy-side, SIM sell-side, SCF indipendenti, uffici studi istituzionali, boutique macroeconomiche). "
+        "NON calcolare né inventare dati numerici storici, multipli o target price: commenta e contestualizza unicamente "
+        "i dati quantitativi ufficiali forniti e le notizie scansionate. "
+        "Concludi sempre e tassativamente con il Dizionario Tecnico Specialistico per educare il risparmiatore, senza formulare raccomandazioni operative personalizzate."
+    )
     
     for tentativo in range(max_tentativi):
         try:
@@ -296,26 +306,25 @@ def genera_report_qualitativo(prompt, api_key):
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
-                    system_instruction=(
-                        "Sei un Senior Equity Analyst e Macroeconomista Istituzionale. Il tuo compito è redigere un report "
-                        "di ricerca ad altissima densità informativa per un piccolo risparmiatore. "
-                        "Adotta rigorosamente la mentalità, il livello di profondità e i focus analitici delle entità censite nella Knowledge Base "
-                        "(SGR buy-side, SIM sell-side, SCF indipendenti, uffici studi istituzionali, boutique macroeconomiche). "
-                        "NON calcolare né inventare dati numerici storici, multipli o target price: commenta e contestualizza unicamente "
-                        "i dati quantitativi ufficiali forniti e le notizie scansionate. "
-                        "Concludi sempre e tassativamente con il Dizionario Tecnico Specialistico per educare il risparmiatore, senza formulare raccomandazioni operative personalizzate."
-                    )
+                    system_instruction=system_inst
                 )
             )
             return risposta.text
         except APIError as e:
-            if tentativo < max_tentativi - 1:
-                time.sleep(attesa)
-                attesa *= 2
+            if e.code in [503, 429] or "503" in str(e):
+                if tentativo < max_tentativi - 1:
+                    # Pausa progressiva con variazione casuale per superare la congestione
+                    tempo_sleep = (attesa_base * (1.8 ** tentativo)) + random.uniform(1.0, 3.0)
+                    time.sleep(tempo_sleep)
+                else:
+                    return (
+                        "I cluster di calcolo del modello gemini-3.8-flash sono momentaneamente saturi sulla quota gratuita. "
+                        "Ti consigliamo di riprovare tra un istante o di attivare il piano pay-as-you-go per avere priorità garantita."
+                    )
             else:
-                return f"Servizio temporaneamente sovraccarico (Codice 503): {str(e)}. Riprova tra pochi istanti."
+                return f"Errore API Google ({e.code}): {str(e)}"
         except Exception as e:
-            return f"Errore durante l'elaborazione del report: {str(e)}"
+            return f"Errore imprevisto durante l'elaborazione del report: {str(e)}"
 
 # -----------------------------------------------------------------------------
 # INTERFACCIA STREAMLIT
@@ -345,7 +354,7 @@ with st.sidebar:
                         domini_attivi.append(dominio)
 
 st.title("🏛️ Terminale Investimenti & Ricerca Finanziaria")
-st.markdown("Dati deterministici di borsa, scansione notizie vincolata alle fonti autorizzate e analisi istituzionale `gemini-3.8-flash`.")
+st.markdown("Dati deterministici di borsa, scansione notizie vincolata alle fonti autorizzate e analisi istituzionale.")
 
 col_c1, col_c2 = st.columns([3, 1])
 with col_c1:
@@ -474,7 +483,7 @@ if st.button("🚀 Avvia Ricerca & Genera Report", type="primary", use_container
        - Spiega ciascun termine con limpidezza pedagogica, illustrando esattamente come l'investitore retail deve interpretarlo nell'analisi concreta di questo titolo.
     """
     
-    with st.spinner("Elaborazione del report approfondito con gemini-3.8-flash..."):
+    with st.spinner("Generazione analisi qualitativa con gemini-3.8-flash (gestione sovraccarichi attiva)..."):
         testo_report = genera_report_qualitativo(prompt_report, api_key)
         st.markdown(testo_report)
 
